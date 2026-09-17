@@ -18,3 +18,11 @@ are private. This page is a public introduction, not a developer guide.
 - Enquiries: [use the address you publish on the website]
 
 We do not accept unsolicited pull requests or public issues on private systems.
+
+## Shared GitHub Actions
+
+Reusable workflows in `.github/workflows/` are callable from any repository in this organization, for example:
+
+```yaml
+uses: Maya-Wealth-Group/.github/.github/workflows/sync-openapi.yml@main
+```

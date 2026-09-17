@@ -1,0 +1,97 @@
+name: Sync OpenAPI to documentation
+
+on:
+  workflow_call:
+    inputs:
+      service:
+        description: API service slug (directory, tickets, enquiry, ...)
+        required: true
+        type: string
+    secrets:
+      DOCS_SYNC_TOKEN:
+        description: PAT with read access to api-kit and write access to documentation
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    concurrency:
+      group: openapi-docs-${{ inputs.service }}
+      cancel-in-progress: false
+    steps:
+      - name: Checkout API
+        uses: actions/checkout@v4
+        with:
+          path: apis/${{ inputs.service }}
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: apis/${{ inputs.service }}/pnpm-lock.yaml
+
+      - name: Install dependencies
+        working-directory: apis/${{ inputs.service }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.DOCS_SYNC_TOKEN }}
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate OpenAPI spec
+        working-directory: apis/${{ inputs.service }}
+        run: pnpm openapi
+
+      - name: Checkout documentation
+        uses: actions/checkout@v4
+        with:
+          repository: Maya-Wealth-Group/documentation
+          ref: main
+          path: sites/documentation
+          token: ${{ secrets.DOCS_SYNC_TOKEN }}
+
+      - name: Copy spec into documentation site
+        run: |
+          mkdir -p "sites/documentation/openapi"
+          cp "apis/${{ inputs.service }}/openapi/openapi.json" "sites/documentation/openapi/${{ inputs.service }}.json"
+          node --input-type=module -e "
+          import fs from 'node:fs';
+          const target = 'sites/documentation/openapi/${{ inputs.service }}.json';
+          const spec = JSON.parse(fs.readFileSync(target, 'utf8'));
+          if (!spec.openapi) {
+            throw new Error(\`Generated spec is missing openapi version: \${target}\`);
+          }
+          "
+
+      - name: Commit and push documentation
+        working-directory: sites/documentation
+        env:
+          SERVICE: ${{ inputs.service }}
+          SOURCE_REPO: ${{ github.repository }}
+          SOURCE_SHA: ${{ github.sha }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add "openapi/${SERVICE}.json"
+          if git diff --staged --quiet; then
+            echo "No OpenAPI changes to publish."
+            exit 0
+          fi
+          git commit -m "chore(openapi): update ${SERVICE} spec from ${SOURCE_REPO}@${SOURCE_SHA}"
+          for attempt in 1 2 3 4 5; do
+            git pull --rebase origin main
+            if git push origin HEAD:main; then
+              exit 0
+            fi
+            echo "Push failed (attempt ${attempt}), retrying..."
+            sleep $((attempt * 2))
+          done
+          echo "Could not push OpenAPI spec after 5 attempts."
+          exit 1

@@ -39,9 +39,20 @@ jobs:
           cache: pnpm
           cache-dependency-path: apis/${{ inputs.service }}/pnpm-lock.yaml
 
+      - name: Configure git auth for private api-kit
+        env:
+          DOCS_SYNC_TOKEN: ${{ secrets.DOCS_SYNC_TOKEN }}
+        run: |
+          if [ -z "$DOCS_SYNC_TOKEN" ]; then
+            echo "DOCS_SYNC_TOKEN is missing. Add it to this repository's Actions secrets."
+            exit 1
+          fi
+          git config --global url."https://x-access-token:${DOCS_SYNC_TOKEN}@github.com/".insteadOf "https://github.com/"
+
       - name: Install dependencies
         working-directory: apis/${{ inputs.service }}
         env:
+          API_KIT_GITHUB_TOKEN: ${{ secrets.DOCS_SYNC_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.DOCS_SYNC_TOKEN }}
         run: pnpm install --frozen-lockfile
 
